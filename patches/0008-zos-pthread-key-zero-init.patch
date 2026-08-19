@@ -1,0 +1,23 @@
+From: RocksDB z/OS Port <zopen@rocksdb>
+Date: 2025-01-01
+Subject: [PATCH 8/9] z/OS: fix pthread_key_t zero-init in util/thread_local.cc
+
+On z/OS pthread_key_t is typedef'd as unsigned int[2] (an array type).
+Initialising an array with (0) in a constructor member-initialiser list
+is ill-formed in C++. Replace pthread_key_(0) with pthread_key_{} for
+valid aggregate zero-initialisation of both scalar and array types.
+
+diff --git a/util/thread_local.cc b/util/thread_local.cc
+index 0000000..0000000 100644
+--- a/util/thread_local.cc
++++ b/util/thread_local.cc
+@@ -297,7 +297,7 @@
+ }
+ 
+ ThreadLocalPtr::StaticMeta::StaticMeta()
+-    : next_instance_id_(0), head_(this), pthread_key_(0) {
++    : next_instance_id_(0), head_(this), pthread_key_{} {
+   if (pthread_key_create(&pthread_key_, &OnThreadExit) != 0) {
+     abort();
+   }
+

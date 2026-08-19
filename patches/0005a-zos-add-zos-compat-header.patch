@@ -1,0 +1,63 @@
+From: RocksDB z/OS Port <zopen@rocksdb>
+Date: 2025-01-01
+Subject: [PATCH 5a/9] z/OS: add new file port/zos_compat.h
+
+z/OS lacks several Linux/glibc-specific identifiers:
+  - O_DIRECT / O_DIRECTORY : not defined; map to 0 (safe no-op)
+  - fread_unlocked          : glibc extension; map to standard fread
+  - major() / minor()       : no <sys/sysmacros.h> on z/OS; stub to 0
+    so the same-device check in GetFreeSpace always passes (conservative)
+
+ZOS_TAG_FD_BINARY(fd) tags an open fd as binary (CCSID 65535) so the
+z/OS kernel never auto-converts pread/pwrite bytes. It calls
+__chgfdccsid(fd, 65535) which is present as a T (code) symbol in
+libzoslib.a (confirmed via nm). The extern "C" declaration prevents
+C++ name-mangling. libzoslib.a is already on every tool link line.
+
+fcntl(F_SETTAG) does not work on this z/OS system (returns EINVAL).
+__chgfdccsid in libzoslib.a is the correct working implementation.
+
+diff --git a/port/zos_compat.h b/port/zos_compat.h
+new file mode 100644
+index 0000000..0000000
+--- /dev/null
++++ b/port/zos_compat.h
+@@ -0,0 +1,37 @@
++// Copyright (c) Meta Platforms, Inc. and affiliates.
++// This source code is licensed under both the GPLv2 (found in the
++// COPYING file in the root directory) and Apache 2.0 License
++// (found in the LICENSE.Apache file in the root directory).
++//
++// z/OS compatibility shims for identifiers absent from z/OS system headers.
++// Include early in files that use Linux/glibc-specific extensions.
++#pragma once
++#if defined(__MVS__)
++#  ifndef O_DIRECT
++#    define O_DIRECT   0
++#  endif
++#  ifndef O_DIRECTORY
++#    define O_DIRECTORY 0
++#  endif
++#  ifndef fread_unlocked
++#    define fread_unlocked fread
++#  endif
++#  ifndef major
++#    define major(dev) (0)
++#    define minor(dev) (0)
++#  endif
++// z/OS file-tag: tag an open fd as ISO-8859-1/ASCII (CCSID 819) so the
++// z/OS kernel treats bytes as ASCII without EBCDIC conversion.
++// CCSID 819 = ISO-8859-1 = ASCII: correct for RocksDB data files written
++// by an ASCII-mode process (-fzos-le-char-mode=ascii). CCSID 65535 (raw
++// binary) prevents all display tools from reading the files correctly.
++// __chgfdccsid is a T-symbol in libzoslib.a (confirmed via nm).
++// extern "C" prevents C++ name-mangling; libzoslib.a is on every link.
++extern "C" int __chgfdccsid(int fd, unsigned short ccsid);
++#  ifndef ZOS_TAG_FD_BINARY
++#    define ZOS_TAG_FD_BINARY(fd) \
++         do { if ((fd) >= 0) (void)__chgfdccsid((fd), 819U); } while (0)
++#  endif
++#else
++#  define ZOS_TAG_FD_BINARY(fd) ((void)(fd))
++#endif
+

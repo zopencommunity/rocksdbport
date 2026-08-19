@@ -1,0 +1,46 @@
+From: RocksDB z/OS Port <zopen@rocksdb>
+Date: 2025-01-01
+Subject: [PATCH 6/9] z/OS: fix NewDirectory (no fd) and d_type in env/fs_posix.cc
+
+Two z/OS-specific fixes:
+
+1. NewDirectory(): z/OS cannot open() a directory to obtain an fd for
+   fsync. On __MVS__, construct PosixDirectory(-1, name) and return OK
+   immediately. Non-z/OS platforms keep the original fd-based path.
+
+2. GetChildren(): z/OS struct dirent has no d_type field and does not
+   define DT_DIR. Replace "entry->d_type == DT_DIR &&" with a pure
+   strcmp-based check that works on all platforms including z/OS.
+
+diff --git a/env/fs_posix.cc b/env/fs_posix.cc
+--- a/env/fs_posix.cc
++++ b/env/fs_posix.cc
+@@ -540,6 +540,11 @@
+                         std::unique_ptr<FSDirectory>* result,
+                         IODebugContext* /*dbg*/) override {
+     result->reset();
++#if defined(__MVS__)
++    // z/OS: cannot open() a directory for an fd; use a no-fd directory object.
++    result->reset(new PosixDirectory(-1, name));
++    return IOStatus::OK();
++#else
+     int fd;
+     int flags = cloexec_flags(0, nullptr);
+     {
+@@ -552,6 +557,7 @@
+       result->reset(new PosixDirectory(fd, name));
+     }
+     return IOStatus::OK();
++#endif
+   }
+ 
+   IOStatus FileExists(const std::string& fname, const IOOptions& /*opts*/,
+@@ -602,7 +608,6 @@
+       // filter out '.' and '..' directory entries
+       // which appear only on some platforms
+       const bool ignore =
+-          entry->d_type == DT_DIR &&
+           (strcmp(entry->d_name, ".") == 0 ||
+            strcmp(entry->d_name, "..") == 0
+ #ifndef ASSERT_STATUS_CHECKED
+

@@ -1,0 +1,28 @@
+From: RocksDB z/OS Port <zopen@rocksdb>
+Date: 2025-01-01
+Subject: [PATCH 4/9] z/OS: replace stckf inline asm with clock_gettime in toku_time.h
+
+OEL clang on z/OS does not support the GCC "=Q" memory-operand constraint
+used with the STCKF instruction, and STCKF is also a macro name in z/OS
+system headers causing a symbol collision. Guard the asm with #ifndef __MVS__
+and supply a clock_gettime(CLOCK_REALTIME) fallback for z/OS.
+
+diff --git a/utilities/transactions/lock/range/range_tree/lib/portability/toku_time.h b/utilities/transactions/lock/range/range_tree/lib/portability/toku_time.h
+index 0000000..0000000 100644
+--- a/utilities/transactions/lock/range/range_tree/lib/portability/toku_time.h
++++ b/utilities/transactions/lock/range/range_tree/lib/portability/toku_time.h
+@@ -135,7 +135,13 @@
+   return __ppc_get_timebase();
+ #elif defined(__s390x__)
+   uint64_t result;
++#ifdef __MVS__
++  /* z/OS: "=Q" constraint unsupported by OEL clang; STCKF is a system macro */
++  { struct timespec _ts; clock_gettime(CLOCK_REALTIME, &_ts);
++    result = (uint64_t)_ts.tv_sec * 1000000000ULL + _ts.tv_nsec; }
++#else
+   asm volatile("stckf %0" : "=Q"(result) : : "cc");
++#endif
+   return result;
+ #elif defined(__riscv) && __riscv_xlen == 32
+   uint32_t cycles_lo, cycles_hi0, cycles_hi1;
+

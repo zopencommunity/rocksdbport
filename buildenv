@@ -11,13 +11,16 @@
 export ZOPEN_PROJECT_NAME="rocksdb"
 export ZOPEN_BUILD_LINE="STABLE"
 export ZOPEN_STABLE_URL="https://github.com/facebook/rocksdb.git"
-export ZOPEN_STABLE_DEPS="procps bash git grep make sed"
+export ZOPEN_STABLE_DEPS="procps bash git grep make sed cmake gflags libiconv ncurses"
 export ZOPEN_DEV_URL="https://github.com/facebook/rocksdb.git"
-export ZOPEN_DEV_DEPS="bash git grep make procps sed"
+export ZOPEN_DEV_DEPS="bash git grep make procps sed cmake gflags libiconv ncurses"
 export ZOPEN_CATEGORIES="database"
 export ZOPEN_RUNTIME_DEPS=""
 # export ZOPEN_SYSTEM_PREREQ="zos25" # optional system pre-req (default=zos25)
 
+# Ensure native /bin is on PATH regardless of login shell state.
+# OEL clang is already on PATH via the zopen check_clang dependency.
+export PATH="/bin:${PATH}"
 
 ###
 ### Build settings (Port type: BUILD, Build system: GNU Make)
@@ -25,11 +28,235 @@ export ZOPEN_RUNTIME_DEPS=""
 ### Optional Settings for GNU Make build system (Autotools)
 #export ZOPEN_EXTRA_CONFIGURE_OPTS="--with-ssl" # Add any additional configure options here
 #export ZOPEN_EXTRA_CFLAGS="-mzos-target=zosv2r5" # Add any additional compiler options here
-
+export ZOPEN_CONFIGURE="skip"
+export ZOPEN_CHECK="skip"
+# ZOPEN_MAKE drives the logged build step.  Point it at the no-op stub
+# Makefile written by zopen_init so zopen's make phase is real and its
+# output is captured in the build log.  The actual cmake + make work
+# happens in zopen_pre_build (logged) rather than in zopen_init (not logged).
+export ZOPEN_MAKE="make"
+export ZOPEN_EXTRA_CFLAGS="-fzos-le-char-mode=ascii -m64 -mzos-target=zosv2r5 -march=z13"
+export ZOPEN_EXTRA_CXXFLAGS="-fzos-le-char-mode=ascii -m64 -mzos-target=zosv2r5 -march=z13 -D__thread="
 
 ###
 ### Required user-supplied functions
 ###
+
+zopen_init() {
+  # zopen_init CWD is rocksdb/ (the cloned source dir).
+  # Capture the port dir absolute path before any cd.
+  PORT_DIR="$(cd .. && pwd)"
+  export HOOK_SAVED="${PORT_DIR}/zoslib_env_hook.saved.o"
+
+  # zopen compiles zoslib_env_hook.o and exports its path as $ZOSLIB_HOOK_OBJ
+  # before calling zopen_init.  Just copy from that env var — no searching needed.
+
+  # Locate dependency install dirs by globbing under ZOPEN_PKGINSTALL.
+  # These variables are exported so zopen_append_to_env can use them.
+  PKGROOT="${ZOPEN_PKGINSTALL:-/usr/local/zopen}"
+
+  ZOSLIB_BASE="${PKGROOT}/zoslib"
+  ZOSLIB_DIR=$(ls -d "${ZOSLIB_BASE}"/zoslib-*.zos 2>/dev/null | head -1)
+  if [ -z "${ZOSLIB_DIR}" ]; then
+    echo "ERROR: Cannot find zoslib installation under ${ZOSLIB_BASE}" >&2
+    exit 1
+  fi
+  export ROCKSDB_PORT_ZOSLIB_DIR="${ZOSLIB_DIR}"
+  ZOSLIB_INC="${ZOSLIB_DIR}/include"
+
+  GFLAGS_DIR=$(ls -d "${PKGROOT}/gflags"/gflags-*.zos 2>/dev/null | head -1)
+  if [ -z "${GFLAGS_DIR}" ]; then
+    echo "ERROR: Cannot find gflags installation under ${PKGROOT}/gflags" >&2
+    exit 1
+  fi
+  export ROCKSDB_PORT_GFLAGS_DIR="${GFLAGS_DIR}"
+
+  LIBICONV_DIR=$(ls -d "${PKGROOT}/libiconv"/libiconv-*.zos 2>/dev/null | head -1)
+  if [ -z "${LIBICONV_DIR}" ]; then
+    echo "ERROR: Cannot find libiconv installation under ${PKGROOT}/libiconv" >&2
+    exit 1
+  fi
+  export ROCKSDB_PORT_LIBICONV_DIR="${LIBICONV_DIR}"
+
+  NCURSES_DIR=$(ls -d "${PKGROOT}/ncurses"/ncurses-*.zos 2>/dev/null | head -1)
+  if [ -z "${NCURSES_DIR}" ]; then
+    echo "ERROR: Cannot find ncurses installation under ${PKGROOT}/ncurses" >&2
+    exit 1
+  fi
+  export ROCKSDB_PORT_NCURSES_DIR="${NCURSES_DIR}"
+
+  # Diagnostic: show what zopen set for us
+  echo "HOOK: ZOSLIB_HOOK_OBJ=${ZOSLIB_HOOK_OBJ}"
+  echo "HOOK: ZOPEN_ROOT=${ZOPEN_ROOT}"
+
+  if [ -n "${ZOSLIB_HOOK_OBJ}" ] && [ -f "${ZOSLIB_HOOK_OBJ}" ]; then
+    cp "${ZOSLIB_HOOK_OBJ}" "${HOOK_SAVED}"
+    echo "HOOK: Copied from \$ZOSLIB_HOOK_OBJ → ${HOOK_SAVED}"
+  elif [ -n "${ZOPEN_ROOT}" ] && [ -f "${ZOPEN_ROOT}/.zoslib_hooks/zoslib_env_hook.o" ]; then
+    cp "${ZOPEN_ROOT}/.zoslib_hooks/zoslib_env_hook.o" "${HOOK_SAVED}"
+    echo "HOOK: Copied from \$ZOPEN_ROOT/.zoslib_hooks → ${HOOK_SAVED}"
+  else
+    # Neither env var worked — print all env vars containing "zoslib" or "hook"
+    # so we can identify the correct variable name in the next run.
+    echo "HOOK: ZOSLIB_HOOK_OBJ not set or file missing. Dumping relevant env:" >&2
+    env | grep -i "zoslib\|hook\|zopen_root\|zopen_pkg" >&2
+    echo "HOOK: Also checking for .o files in common locations:" >&2
+    ls "${ZOPEN_ROOTFS:-/}/.zoslib_hooks/" 2>/dev/null >&2 || true
+    ls "${PKGROOT}/.zoslib_hooks/" 2>/dev/null >&2 || true
+    find "${PKGROOT}" -maxdepth 4 -name "zoslib_env_hook.o" 2>/dev/null >&2 || true
+    echo "ERROR: Cannot obtain zoslib_env_hook.o" >&2
+    exit 1
+  fi
+  # Source patches are applied by zopen's built-in patch mechanism before
+  # zopen_init runs. See patches/ directory for the z/OS patch files.
+  #
+  # The db_stress_tool files are excluded from patch 0002 because upstream
+  # main changes frequently. Apply their thread_local removals here instead,
+  # using pattern-based sed that is robust against line number shifts.
+  sed -i 's/\bthread_local bool SharedState::ignore_read_error;/bool SharedState::ignore_read_error;/' \
+    db_stress_tool/db_stress_shared_state.cc || true
+  sed -i 's/\bstatic thread_local bool ignore_read_error;/  static bool ignore_read_error;/' \
+    db_stress_tool/db_stress_shared_state.h || true
+  sed -i 's/\bthread_local Random rand(/static Random rand(/' \
+    db_stress_tool/db_stress_test_base.cc || true
+  sed -i 's/\bthread_local Random rand(/static Random rand(/' \
+    db_stress_tool/multi_ops_txns_stress.cc || true
+  # table/block_based/block_based_table_builder.cc: upstream added
+  # thread_local AutoSkipCarry carry{} in a function that returns a reference.
+  # Must be static (not merely non-thread-local) so carry lives in static
+  # storage and the returned reference is valid after the function returns.
+  sed -i 's/\bthread_local AutoSkipCarry carry{}/static AutoSkipCarry carry{}/' \
+    table/block_based/block_based_table_builder.cc || true
+
+  # z/OS binder cannot resolve these zoslib override symbols from libzoslib.a
+  # because they are weak aliases that the binder skips during archive scanning.
+  # Provide explicit strong function definitions so the link succeeds.
+  #
+  # Diagnosis:
+  # - fdatasync_undefined : absent from archive scan → stub needed
+  # - __posix_memalign_replaced : zoslib stdlib.h maps posix_memalign to this
+  #     name; must be defined with the POSIX posix_memalign signature.
+  # - strnlen : absent from archive scan → stub needed
+  #
+  # __chgfdccsid is NOT in this stub. ZOS_TAG_FD_BINARY (patch 0005a) calls
+  # __chgfdccsid(fd, 819) from libzoslib.a to tag fds as CCSID 819 (ASCII).
+  # CCSID 819 = ISO-8859-1: correct for ASCII-mode process data files.
+  # libzoslib.a is explicitly on the tools link line (see below).
+  cat > zos_stub_syms.c << 'STUBEOF'
+#include <stddef.h>
+#include <stdlib.h>
+#include <string.h>
+#include <errno.h>
+#include <unistd.h>
+/* Explicit strong function definitions to satisfy the z/OS binder.
+   libzoslib.a only provides these as weak aliases that the binder skips
+   when scanning archives; plain .o symbols are always included. */
+
+/* fdatasync is not available on z/OS; zoslib calls this stub instead. */
+int fdatasync_undefined(int fd) { (void)fd; return 0; }
+
+/* zoslib stdlib.h: #define posix_memalign __posix_memalign_replaced
+   Must match the POSIX posix_memalign signature exactly.
+   Use aligned_alloc (C11, available on z/OS) so that the pointer returned
+   is directly free()-able — no hidden base-pointer bookkeeping needed. */
+int __posix_memalign_replaced(void **memptr, size_t alignment, size_t size) {
+  if (alignment == 0 || (alignment & (alignment - 1)) != 0
+      || (alignment % sizeof(void *)) != 0)
+    return EINVAL;
+  /* aligned_alloc requires size to be a multiple of alignment */
+  size_t sz = (size + alignment - 1) & ~(alignment - 1);
+  void *p = aligned_alloc(alignment, sz);
+  if (!p) return ENOMEM;
+  *memptr = p;
+  return 0;
+}
+
+/* strnlen: delegate via memchr so behaviour matches the system version. */
+size_t strnlen(const char *s, size_t maxlen) {
+  const char *p = (const char *)memchr(s, '\0', maxlen);
+  return p ? (size_t)(p - s) : maxlen;
+}
+STUBEOF
+  clang -fzos-le-char-mode=ascii -m64 -mzos-target=zosv2r5 -march=z13 \
+    -c zos_stub_syms.c -o zos_stub_syms.o 2>&1
+  if [ ! -f zos_stub_syms.o ]; then
+    echo "ERROR: zos_stub_syms.c failed to compile" >&2
+    exit 1
+  fi
+  export ZOS_STUB_OBJ="$(pwd)/zos_stub_syms.o"
+
+  # Write the real build logic into the Makefile's 'all' target.
+  # zopen captures ZOPEN_MAKE ("make all") stdout+stderr into the build log,
+  # so embedding the cmake + make work here is what gets it logged.
+  # All variables used inside the recipe (ZOPEN_EXTRA_CFLAGS, ZOS_STUB_OBJ,
+  # HOOK_SAVED) are exported, so the sub-shell make spawns can see them.
+  if [ -f Makefile ]; then
+    mv Makefile Makefile.rocksdb
+  fi
+  # Use printf to write the Makefile so recipe lines get real tab characters.
+  # make requires a hard tab at the start of every recipe line; heredocs in
+  # buildenv (sourced by bash) can lose tabs depending on editor settings.
+  printf '%s\n' \
+    'all:' \
+    '	mkdir -p _zopen_build' \
+    '	cd _zopen_build && cmake .. \' \
+    '	  -DCMAKE_C_COMPILER=clang \' \
+    '	  -DCMAKE_CXX_COMPILER=clang++ \' \
+    '	  -DCMAKE_BUILD_TYPE=Release \' \
+    '	  -DCMAKE_C_FLAGS="$$ZOPEN_EXTRA_CFLAGS" \' \
+    '	  -DCMAKE_CXX_FLAGS="$$ZOPEN_EXTRA_CXXFLAGS" \' \
+    '	  -DWITH_TESTS=OFF \' \
+    '	  -DWITH_BENCHMARK_TOOLS=OFF \' \
+    '	  -DWITH_TOOLS=ON \' \
+    '	  -DROCKSDB_BUILD_SHARED=OFF \' \
+    '	  -DFAIL_ON_WARNINGS=OFF \' \
+    '	  -DPORTABLE=ON' \
+    '	cd _zopen_build && make -j4 rocksdb' \
+    '	cd _zopen_build && \' \
+    '	  ZOSLIB_LIB=$$ROCKSDB_PORT_ZOSLIB_DIR/lib && \' \
+    '	  { [ -n "$$ZOSLIB_LIB" ] && [ -d "$$ZOSLIB_LIB" ] || { echo "ERROR: Cannot locate $$ZOSLIB_LIB" >&2; exit 1; }; } && \' \
+    '	  { [ -f "$$HOOK_SAVED" ] || { echo "ERROR: $$HOOK_SAVED not found" >&2; exit 1; }; } && \' \
+    '	  find . -name link.txt | while IFS= read -r f; do \' \
+    '	    sed -i '"'"'s/ -latomic//g'"'"' "$$f"; \' \
+    '	    case "$$f" in \' \
+    '	      */tools/*) \' \
+    '	        grep -q zos_stub_syms "$$f" || \' \
+    '	          sed -i "s|libgflags_nothreads.a|libgflags_nothreads.a $$ZOS_STUB_OBJ $$ZOSLIB_LIB/libzoslib.a $$HOOK_SAVED|" "$$f"; \' \
+    '	        grep -q bSTORENX=YES "$$f" || \' \
+    '	          sed -i '"'"'s|$$| -Wl,-bSTORENX=YES|'"'"' "$$f"; \' \
+    '	        ;; \' \
+    '	    esac; \' \
+    '	  done' \
+    '	cd _zopen_build && make -j4 ldb sst_dump' \
+    '' \
+    'install:' \
+    '	@true' \
+    > Makefile
+}
+
+zopen_pre_install() {
+  # PKGROOT is not in scope here — re-derive it from ZOPEN_PKGINSTALL.
+  PKGROOT="${ZOPEN_PKGINSTALL:-/usr/local/zopen}"
+  INSTALL_DIR="${ZOPEN_INSTALL_DIR:-${PKGROOT}/rocksdb/rocksdb-main}"
+  mkdir -p "${INSTALL_DIR}/lib"
+  mkdir -p "${INSTALL_DIR}/include"
+  mkdir -p "${INSTALL_DIR}/bin"
+  cp _zopen_build/librocksdb.a "${INSTALL_DIR}/lib/"
+  cp "${ZOS_STUB_OBJ}" "${INSTALL_DIR}/lib/zos_stub_syms.o"
+  cp "${HOOK_SAVED}"   "${INSTALL_DIR}/lib/zoslib_env_hook.o"
+  cp -r include/rocksdb "${INSTALL_DIR}/include/"
+  # cmake puts tool binaries under tools/ subdirectory, not the build root
+  cp _zopen_build/tools/ldb "${INSTALL_DIR}/bin/"
+  cp _zopen_build/tools/sst_dump "${INSTALL_DIR}/bin/"
+  # zopen expects a binary named after the project ("rocksdb").
+  # RocksDB has no executable by that name; create a thin wrapper around ldb.
+  cat > "${INSTALL_DIR}/bin/rocksdb" << 'WRAPEOF'
+#!/bin/sh
+# rocksdb - wrapper around the RocksDB ldb command-line tool
+exec "$(dirname "$0")/ldb" "$@"
+WRAPEOF
+  chmod 755 "${INSTALL_DIR}/bin/rocksdb"
+}
 
 zopen_check_results() {
   dir="$1"
@@ -43,7 +270,14 @@ zopen_check_results() {
 }
 
 zopen_get_version() {
-  echo "1.0.0" # Modify to echo the version of your tool/library
+  # Version is defined as three #define lines in include/rocksdb/version.h:
+  #   #define ROCKSDB_MAJOR 11
+  #   #define ROCKSDB_MINOR 7
+  #   #define ROCKSDB_PATCH 0
+  MAJOR=$(grep "^#define ROCKSDB_MAJOR" rocksdb/include/rocksdb/version.h 2>/dev/null | awk '{print $3}')
+  MINOR=$(grep "^#define ROCKSDB_MINOR" rocksdb/include/rocksdb/version.h 2>/dev/null | awk '{print $3}')
+  PATCH=$(grep "^#define ROCKSDB_PATCH" rocksdb/include/rocksdb/version.h 2>/dev/null | awk '{print $3}')
+  echo "${MAJOR}.${MINOR}.${PATCH}"
 }
 
 
@@ -61,6 +295,24 @@ zopen_get_version() {
 #fi
 #END
 #}
+
+zopen_append_to_env() {
+  # The ROCKSDB_PORT_*_DIR variables were resolved and exported by zopen_init
+  # above, so they are available here with their exact version-stamped paths.
+  # Using an unquoted END delimiter so the shell expands them when writing .env.
+  #
+  # Guard pattern: only append if ZOPEN_ROCKSDB_ENV_SET is not already "1".
+  # This makes setup.sh safe to source multiple times without duplicating flags.
+  cat <<END
+if [ "\${ZOPEN_ROCKSDB_ENV_SET}" != "1" ]; then
+  export ZOPEN_ROCKSDB_ENV_SET=1
+  export ZOPEN_EXTRA_CFLAGS="\${ZOPEN_EXTRA_CFLAGS} -I\${PWD}/include"
+  export ZOPEN_EXTRA_CXXFLAGS="\${ZOPEN_EXTRA_CXXFLAGS} -fzos-le-char-mode=ascii -m64 -mzos-target=zosv2r5 -march=z13 -D__thread= -isystem ${ROCKSDB_PORT_ZOSLIB_DIR}/include -include ${ROCKSDB_PORT_ZOSLIB_DIR}/include/zos-v2r5-symbolfixes.h -I${ROCKSDB_PORT_LIBICONV_DIR}/include -I${ROCKSDB_PORT_NCURSES_DIR}/include -I${ROCKSDB_PORT_NCURSES_DIR}/include/ncurses -I\${PWD}/include"
+  export ZOPEN_EXTRA_LDFLAGS="\${ZOPEN_EXTRA_LDFLAGS} -L\${PWD}/lib -L${ROCKSDB_PORT_ZOSLIB_DIR}/lib -L${ROCKSDB_PORT_LIBICONV_DIR}/lib -L${ROCKSDB_PORT_NCURSES_DIR}/lib -Wl,-bSTORENX=YES"
+  export ZOPEN_EXTRA_LIBS="\${ZOPEN_EXTRA_LIBS} \${PWD}/lib/librocksdb.a ${ROCKSDB_PORT_GFLAGS_DIR}/lib/libgflags_nothreads.a ${ROCKSDB_PORT_ZOSLIB_DIR}/lib/libzoslib.a \${PWD}/lib/zos_stub_syms.o \${PWD}/lib/zoslib_env_hook.o"
+fi
+END
+}
 
 ###
 ### Optional User-Supplied Hooks (uncomment to use)
@@ -122,4 +374,3 @@ zopen_get_version() {
 #zopen_pre_terminate(){
 #  ## This function runs before 'zopen build' terminates.
 #}
-

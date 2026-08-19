@@ -1,0 +1,94 @@
+From: RocksDB z/OS Port <zopen@rocksdb>
+Date: 2025-01-01
+Subject: [PATCH 5b/9] z/OS: include zos_compat.h and tag all data-file fds binary
+
+Include the z/OS compat header (added in patch 5a) early in both env
+files so O_DIRECT, O_DIRECTORY, fread_unlocked, major, and minor stubs
+are available before any Linux-specific use of those identifiers.
+
+Also tag every data-file fd as CCSID 819 (ISO-8859-1/ASCII) immediately
+after open() succeeds. On z/OS with -fzos-le-char-mode=ascii, untagged
+files are subject to auto-conversion: the kernel silently translates
+between ASCII and EBCDIC on every read/write. RocksDB uses raw
+pread/pwrite for all database files (SST, WAL, MANIFEST, CURRENT,
+IDENTITY); any auto-conversion corrupts the binary record format,
+causing ldb scan to return nothing.
+CCSID 819 = ISO-8859-1 = ASCII: correct for files written by an
+ASCII-mode process. CCSID 65535 (raw binary) also prevents conversion
+but causes ldb and display tools to misread the files.
+ZOS_TAG_FD_BINARY calls __chgfdccsid(fd, 819) — a T-symbol in
+libzoslib.a. On all other platforms it is a no-op.
+
+diff --git a/env/fs_posix.cc b/env/fs_posix.cc
+index 0000000..0000000 100644
+--- a/env/fs_posix.cc
++++ b/env/fs_posix.cc
+@@ -9,6 +9,7 @@
+ 
+ #if !defined(OS_WIN)
+ 
++#include "port/zos_compat.h"
+ #include <dirent.h>
+ #ifndef ROCKSDB_NO_DYNAMIC_EXTENSION
+ #include <dlfcn.h>
+@@ -186,6 +187,7 @@
+     }
+ 
+     SetFD_CLOEXEC(fd, &options);
++    ZOS_TAG_FD_BINARY(fd);
+ 
+     if (options.use_direct_reads && !options.use_mmap_reads) {
+ #ifdef OS_MACOSX
+@@ -236,6 +238,7 @@
+       return s;
+     }
+     SetFD_CLOEXEC(fd, &options);
++    ZOS_TAG_FD_BINARY(fd);
+ 
+     if (options.use_mmap_reads) {
+       // Use of mmap for random reads has been removed because it
+@@ -322,6 +325,7 @@
+       return s;
+     }
+     SetFD_CLOEXEC(fd, &options);
++    ZOS_TAG_FD_BINARY(fd);
+ 
+     if (options.use_mmap_writes) {
+       MaybeForceDisableMmap(fd);
+@@ -420,6 +424,7 @@
+     }
+ 
+     SetFD_CLOEXEC(fd, &options);
++    ZOS_TAG_FD_BINARY(fd);
+     // rename into place
+     if (rename(old_fname.c_str(), fname.c_str()) != 0) {
+       s = IOError("while rename file to " + fname, old_fname, errno);
+@@ -486,6 +491,7 @@
+     }
+ 
+     SetFD_CLOEXEC(fd, &options);
++    ZOS_TAG_FD_BINARY(fd);
+     result->reset(new PosixRandomRWFile(fname, fd, options));
+     return IOStatus::OK();
+   }
+@@ -510,6 +516,7 @@
+         break;
+       }
+     }
++    ZOS_TAG_FD_BINARY(fd);
+     uint64_t size;
+     if (status.ok()) {
+       IOOptions opts;
+diff --git a/env/io_posix.cc b/env/io_posix.cc
+index 0000000..0000000 100644
+--- a/env/io_posix.cc
++++ b/env/io_posix.cc
+@@ -10,6 +10,7 @@
+ #ifdef ROCKSDB_LIB_IO_POSIX
+ #include "env/io_posix.h"
+ 
++#include "port/zos_compat.h"
+ #include <fcntl.h>
+ 
+ #include <algorithm>
+

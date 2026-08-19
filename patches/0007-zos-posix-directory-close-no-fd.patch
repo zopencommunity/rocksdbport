@@ -1,0 +1,23 @@
+From: RocksDB z/OS Port <zopen@rocksdb>
+Date: 2025-01-01
+Subject: [PATCH 7/9] z/OS: guard PosixDirectory::Close() against fd == -1
+
+When NewDirectory() runs on z/OS it constructs PosixDirectory(-1, name).
+Close() must treat fd_ == -1 as "nothing to close" and return OK without
+calling close(-1).
+
+diff --git a/env/io_posix.cc b/env/io_posix.cc
+--- a/env/io_posix.cc
++++ b/env/io_posix.cc
+@@ -1952,6 +1952,10 @@
+ IOStatus PosixDirectory::Close(const IOOptions& /*opts*/,
+                                IODebugContext* /*dbg*/) {
+   IOStatus s = IOStatus::OK();
++  if (fd_ == -1) {
++    // z/OS no-fd directory object: nothing to close.
++    return s;
++  }
+   if (close(fd_) < 0) {
+     s = IOError("While closing directory ", directory_name_, errno);
+   } else {
+

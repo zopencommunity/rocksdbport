@@ -1,0 +1,62 @@
+From: RocksDB z/OS Port <zopen@rocksdb>
+Date: 2025-01-01
+Subject: [PATCH 9/9] z/OS: replace anonymous mmap with calloc in port/mmap.cc
+
+z/OS does not support anonymous mmap: MAP_ANONYMOUS/MAP_ANON are Linux-
+only, and mmap(MAP_PRIVATE, fd=-1) returns MAP_FAILED on z/OS.
+
+Two __MVS__-guarded changes:
+1. ~MemMapping() destructor: use free() instead of munmap() on z/OS.
+2. AllocateAnonymous(): use calloc(1, length) instead of mmap() on z/OS.
+   calloc provides the same zero-filled anonymous memory semantics.
+   Add #include <cstdlib> for calloc/free.
+
+diff --git a/port/mmap.cc b/port/mmap.cc
+--- a/port/mmap.cc
++++ b/port/mmap.cc
+@@ -7,6 +7,7 @@
+ 
+ #include <cassert>
+ #include <cstdio>
++#include <cstdlib>
+ #include <cstring>
+ #include <new>
+ #include <utility>
+@@ -24,13 +25,19 @@
+     (void)::CloseHandle(page_file_handle_);
+   }
+ #else   // OS_WIN -> !OS_WIN
++#ifdef __MVS__
+   if (addr_ != nullptr) {
++    free(addr_);
++  }
++#else
++  if (addr_ != nullptr) {
+     auto status = munmap(addr_, length_);
+     assert(status == 0);
+     if (status != 0) {
+       // TODO: handle error?
+     }
+   }
++#endif  // __MVS__
+ #endif  // OS_WIN
+ }
+ 
+@@ -78,11 +85,16 @@
+     huge_flag = MAP_HUGETLB;
+ #endif  // MAP_HUGE_TLB
+   }
++#ifdef __MVS__
++  // z/OS: anonymous mmap unsupported; use calloc for zero-filled memory.
++  mm.addr_ = calloc(1, length);
++#else
+   mm.addr_ = mmap(nullptr, length, PROT_READ | PROT_WRITE,
+                   MAP_PRIVATE | MAP_ANONYMOUS | huge_flag, -1, 0);
+   if (mm.addr_ == MAP_FAILED) {
+     mm.addr_ = nullptr;
+   }
++#endif  // __MVS__
+ #endif  // OS_WIN
+   return mm;
+ }
+
