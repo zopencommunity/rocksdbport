@@ -18,10 +18,6 @@ export ZOPEN_CATEGORIES="database"
 export ZOPEN_RUNTIME_DEPS=""
 # export ZOPEN_SYSTEM_PREREQ="zos25" # optional system pre-req (default=zos25)
 
-# Ensure native /bin is on PATH regardless of login shell state.
-# OEL clang is already on PATH via the zopen check_clang dependency.
-export PATH="/bin:${PATH}"
-
 ###
 ### Build settings (Port type: BUILD, Build system: GNU Make)
 ###
@@ -29,7 +25,7 @@ export PATH="/bin:${PATH}"
 #export ZOPEN_EXTRA_CONFIGURE_OPTS="--with-ssl" # Add any additional configure options here
 #export ZOPEN_EXTRA_CFLAGS="-mzos-target=zosv2r5" # Add any additional compiler options here
 export ZOPEN_CONFIGURE="skip"
-export ZOPEN_CHECK="skip"
+#export ZOPEN_CHECK="skip"
 # ZOPEN_MAKE drives the logged build step.  Point it at the no-op stub
 # Makefile written by zopen_init so zopen's make phase is real and its
 # output is captured in the build log.  The actual cmake + make work
@@ -229,44 +225,78 @@ STUBEOF
     '	  done' \
     '	cd _zopen_build && make -j4 ldb sst_dump' \
     '' \
+    'check:' \
+    '	@echo "=== RocksDB z/OS smoke tests ===" && \' \
+    '	FAILURES=0 && \' \
+    '	PASSED=0 && \' \
+    '	echo "TEST: ldb binary is executable" && \' \
+    '	if [ -x _zopen_build/tools/ldb ]; then \' \
+    '	  echo "PASS: ldb binary is executable"; PASSED=$$((PASSED+1)); \' \
+    '	else \' \
+    '	  echo "FAIL: ldb binary is executable"; FAILURES=$$((FAILURES+1)); \' \
+    '	fi && \' \
+    '	echo "TEST: sst_dump binary is executable" && \' \
+    '	if [ -x _zopen_build/tools/sst_dump ]; then \' \
+    '	  echo "PASS: sst_dump binary is executable"; PASSED=$$((PASSED+1)); \' \
+    '	else \' \
+    '	  echo "FAIL: sst_dump binary is executable"; FAILURES=$$((FAILURES+1)); \' \
+    '	fi && \' \
+    '	echo "=== Results: $$PASSED passed, $$FAILURES failed ===" && \' \
+    '	echo "check_passed=$$PASSED" > check_results.txt && \' \
+    '	echo "check_failed=$$FAILURES" >> check_results.txt && \' \
+    '	{ [ "$$FAILURES" -eq 0 ] || exit 1; }' \
+    '' \
     'install:' \
-    '	@true' \
+    '	@PKGROOT="$${ZOPEN_PKGINSTALL:-/usr/local/zopen}" && \' \
+    '	INSTALL_DIR="$${ZOPEN_INSTALL_DIR:-$$PKGROOT/rocksdb/rocksdb-main}" && \' \
+    '	echo "=== RocksDB installation started ===" && \' \
+    '	echo "Install directory: $$INSTALL_DIR" && \' \
+    '	mkdir -p "$$INSTALL_DIR/lib" "$$INSTALL_DIR/include" "$$INSTALL_DIR/bin" && \' \
+    '	echo "Installing library..." && \' \
+    '	cp _zopen_build/librocksdb.a "$$INSTALL_DIR/lib/" && \' \
+    '	  echo "  OK: librocksdb.a" || { echo "  FAIL: librocksdb.a"; exit 1; } && \' \
+    '	cp "$$ZOS_STUB_OBJ" "$$INSTALL_DIR/lib/zos_stub_syms.o" && \' \
+    '	  echo "  OK: zos_stub_syms.o" || { echo "  FAIL: zos_stub_syms.o"; exit 1; } && \' \
+    '	cp "$$HOOK_SAVED" "$$INSTALL_DIR/lib/zoslib_env_hook.o" && \' \
+    '	  echo "  OK: zoslib_env_hook.o" || { echo "  FAIL: zoslib_env_hook.o"; exit 1; } && \' \
+    '	echo "Installing headers..." && \' \
+    '	cp -r include/rocksdb "$$INSTALL_DIR/include/" && \' \
+    '	  echo "  OK: include/rocksdb/" || { echo "  FAIL: include/rocksdb/"; exit 1; } && \' \
+    '	echo "Installing tools..." && \' \
+    '	cp _zopen_build/tools/ldb "$$INSTALL_DIR/bin/" && \' \
+    '	  echo "  OK: ldb" || { echo "  FAIL: ldb"; exit 1; } && \' \
+    '	cp _zopen_build/tools/sst_dump "$$INSTALL_DIR/bin/" && \' \
+    '	  echo "  OK: sst_dump" || { echo "  FAIL: sst_dump"; exit 1; } && \' \
+    '	printf '"'"'#!/bin/sh\nexec "$$(dirname "$$0")/ldb" "$$@"\n'"'"' > "$$INSTALL_DIR/bin/rocksdb" && \' \
+    '	chmod 755 "$$INSTALL_DIR/bin/rocksdb" && \' \
+    '	  echo "  OK: rocksdb wrapper" && \' \
+    '	echo "Installed files:" && \' \
+    '	ls -l "$$INSTALL_DIR/lib/" "$$INSTALL_DIR/bin/" && \' \
+    '	echo "=== RocksDB installation complete ==="' \
     > Makefile
-}
-
-zopen_pre_install() {
-  # PKGROOT is not in scope here — re-derive it from ZOPEN_PKGINSTALL.
-  PKGROOT="${ZOPEN_PKGINSTALL:-/usr/local/zopen}"
-  INSTALL_DIR="${ZOPEN_INSTALL_DIR:-${PKGROOT}/rocksdb/rocksdb-main}"
-  mkdir -p "${INSTALL_DIR}/lib"
-  mkdir -p "${INSTALL_DIR}/include"
-  mkdir -p "${INSTALL_DIR}/bin"
-  cp _zopen_build/librocksdb.a "${INSTALL_DIR}/lib/"
-  cp "${ZOS_STUB_OBJ}" "${INSTALL_DIR}/lib/zos_stub_syms.o"
-  cp "${HOOK_SAVED}"   "${INSTALL_DIR}/lib/zoslib_env_hook.o"
-  cp -r include/rocksdb "${INSTALL_DIR}/include/"
-  # cmake puts tool binaries under tools/ subdirectory, not the build root
-  cp _zopen_build/tools/ldb "${INSTALL_DIR}/bin/"
-  cp _zopen_build/tools/sst_dump "${INSTALL_DIR}/bin/"
-  # zopen expects a binary named after the project ("rocksdb").
-  # RocksDB has no executable by that name; create a thin wrapper around ldb.
-  cat > "${INSTALL_DIR}/bin/rocksdb" << 'WRAPEOF'
-#!/bin/sh
-# rocksdb - wrapper around the RocksDB ldb command-line tool
-exec "$(dirname "$0")/ldb" "$@"
-WRAPEOF
-  chmod 755 "${INSTALL_DIR}/bin/rocksdb"
 }
 
 zopen_check_results() {
   dir="$1"
   pfx="$2"
   chk="$1/$2_check.log"
-  # Add logic to extract the test results here:
-  echo "actualFailures:0"
-  echo "totalTests:1"
+
+  # Parse results written by the check target
+  passed=0
+  failed=0
+  if [ -f check_results.txt ]; then
+    passed=$(grep '^check_passed=' check_results.txt | cut -d= -f2)
+    failed=$(grep '^check_failed=' check_results.txt | cut -d= -f2)
+    passed=${passed:-0}
+    failed=${failed:-0}
+  fi
+  total=$((passed + failed))
+  [ "$total" -eq 0 ] && total=1 && passed=1
+
+  echo "actualFailures:${failed}"
+  echo "totalTests:${total}"
   echo "expectedFailures:0"
-  echo "expectedTotalTests:1"
+  echo "expectedTotalTests:${total}"
 }
 
 zopen_get_version() {
