@@ -1,7 +1,0 @@
-log/
-log.DEV/
-log.STABLE/
-build/
-install/
-.zoslib_hooks/
-.installing
