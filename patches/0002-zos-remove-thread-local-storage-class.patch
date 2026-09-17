@@ -1,0 +1,284 @@
+From: RocksDB z/OS Port <zopen@rocksdb>
+Date: 2025-01-01
+Subject: [PATCH 2/9] z/OS: remove thread_local storage-class keyword
+
+OEL clang on z/OS does not support the C++11 thread_local storage-class
+specifier - it conflicts with the zoslib -D__thread= macro. Remove every
+occurrence used as a storage-class specifier across the source tree.
+This matches the original sed sweep:
+  grep -rl "thread_local" --include="*.h" --include="*.cc" --include="*.cpp" .
+    | xargs sed -i -e 's/\bthread_local\b //g' -e 's/\bthread_local\b$//g'
+Identifiers that merely contain the substring (thread_local_key,
+ThreadLocalPtr, etc.) are left untouched.
+
+diff --git a/util/thread_local.cc b/util/thread_local.cc
+index 0000000..0000000 100644
+--- a/util/thread_local.cc
++++ b/util/thread_local.cc
+@@ -140,14 +140,14 @@
+   // using this variable directly.
+   port::Mutex mutex_;
+   // Thread local storage
+-  static thread_local ThreadData* tls_;
++  static ThreadData* tls_;
+ 
+   // Used to make thread exit trigger possible if !defined(OS_MACOSX).
+   // Otherwise, used to retrieve thread data.
+   pthread_key_t pthread_key_;
+ };
+ 
+-thread_local ThreadData* ThreadLocalPtr::StaticMeta::tls_ = nullptr;
++ThreadData* ThreadLocalPtr::StaticMeta::tls_ = nullptr;
+ 
+ // Windows doesn't support a per-thread destructor with its
+ // TLS primitives.  So, we build it manually by inserting a
+diff --git a/util/random.cc b/util/random.cc
+index 0000000..0000000 100644
+--- a/util/random.cc
++++ b/util/random.cc
+@@ -16,7 +16,7 @@
+ #include "util/aligned_storage.h"
+ #include "util/thread_local.h"
+ 
+-#define STORAGE_DECL static thread_local
++#define STORAGE_DECL static
+ 
+ namespace ROCKSDB_NAMESPACE {
+ 
+diff --git a/monitoring/iostats_context.cc b/monitoring/iostats_context.cc
+index 0000000..0000000 100644
+--- a/monitoring/iostats_context.cc
++++ b/monitoring/iostats_context.cc
+@@ -15,7 +15,7 @@
+ // Put here just to make get_iostats_context() simple without ifdef.
+ static IOStatsContext iostats_context;
+ #else
+-thread_local IOStatsContext iostats_context;
++IOStatsContext iostats_context;
+ #endif
+ 
+ IOStatsContext* get_iostats_context() { return &iostats_context; }
+diff --git a/monitoring/iostats_context_imp.h b/monitoring/iostats_context_imp.h
+index 0000000..0000000 100644
+--- a/monitoring/iostats_context_imp.h
++++ b/monitoring/iostats_context_imp.h
+@@ -9,7 +9,7 @@
+ 
+ #if !defined(NIOSTATS_CONTEXT)
+ namespace ROCKSDB_NAMESPACE {
+-extern thread_local IOStatsContext iostats_context;
++extern IOStatsContext iostats_context;
+ }  // namespace ROCKSDB_NAMESPACE
+ 
+ // increment a specific counter by the specified value
+diff --git a/monitoring/perf_level.cc b/monitoring/perf_level.cc
+index 0000000..0000000 100644
+--- a/monitoring/perf_level.cc
++++ b/monitoring/perf_level.cc
+@@ -10,7 +10,7 @@
+ 
+ namespace ROCKSDB_NAMESPACE {
+ 
+-thread_local PerfLevel perf_level = kEnableCount;
++PerfLevel perf_level = kEnableCount;
+ 
+ void SetPerfLevel(PerfLevel level) {
+   assert(level > kUninitialized);
+diff --git a/monitoring/perf_level_imp.h b/monitoring/perf_level_imp.h
+index 0000000..0000000 100644
+--- a/monitoring/perf_level_imp.h
++++ b/monitoring/perf_level_imp.h
+@@ -9,6 +9,6 @@
+ 
+ namespace ROCKSDB_NAMESPACE {
+ 
+-extern thread_local PerfLevel perf_level;
++extern PerfLevel perf_level;
+ 
+ }  // namespace ROCKSDB_NAMESPACE
+diff --git a/monitoring/perf_context.cc b/monitoring/perf_context.cc
+index 0000000..0000000 100644
+--- a/monitoring/perf_context.cc
++++ b/monitoring/perf_context.cc
+@@ -176,7 +176,7 @@
+ // Put here just to make get_perf_context() simple without ifdef.
+ PerfContext perf_context;
+ #else
+-thread_local PerfContext perf_context;
++PerfContext perf_context;
+ #endif
+ 
+ PerfContext* get_perf_context() {
+diff --git a/monitoring/perf_context_imp.h b/monitoring/perf_context_imp.h
+index 0000000..0000000 100644
+--- a/monitoring/perf_context_imp.h
++++ b/monitoring/perf_context_imp.h
+@@ -16,7 +16,7 @@
+ extern thread_local PerfContext perf_context_;
+ #define perf_context (*get_perf_context())
+ #else
+-extern thread_local PerfContext perf_context;
++extern PerfContext perf_context;
+ #endif
+ #endif
+ 
+diff --git a/monitoring/thread_status_util.cc b/monitoring/thread_status_util.cc
+index 0000000..0000000 100644
+--- a/monitoring/thread_status_util.cc
++++ b/monitoring/thread_status_util.cc
+@@ -12,9 +12,9 @@
+ namespace ROCKSDB_NAMESPACE {
+ 
+ #ifndef NROCKSDB_THREAD_STATUS
+-thread_local ThreadStatusUpdater*
++ThreadStatusUpdater*
+     ThreadStatusUtil::thread_updater_local_cache_ = nullptr;
+-thread_local bool ThreadStatusUtil::thread_updater_initialized_ = false;
++bool ThreadStatusUtil::thread_updater_initialized_ = false;
+ 
+ void ThreadStatusUtil::RegisterThread(const Env* env,
+                                       ThreadStatus::ThreadType thread_type) {
+diff --git a/monitoring/thread_status_util.h b/monitoring/thread_status_util.h
+index 0000000..0000000 100644
+--- a/monitoring/thread_status_util.h
++++ b/monitoring/thread_status_util.h
+@@ -100,7 +100,7 @@
+   // When this variable is set to true, thread_updater_local_cache_
+   // will not be updated until this variable is again set to false
+   // in UnregisterThread().
+-  static thread_local bool thread_updater_initialized_;
++  static bool thread_updater_initialized_;
+ 
+   // The thread-local cached ThreadStatusUpdater that caches the
+   // thread_status_updater_ of the first Env that uses any ThreadStatusUtil
+@@ -115,7 +115,7 @@
+   // When thread_updater_initialized_ is set to true, this variable
+   // will not be updated until this thread_updater_initialized_ is
+   // again set to false in UnregisterThread().
+-  static thread_local ThreadStatusUpdater* thread_updater_local_cache_;
++  static ThreadStatusUpdater* thread_updater_local_cache_;
+ #else
+   static bool thread_updater_initialized_;
+   static ThreadStatusUpdater* thread_updater_local_cache_;
+diff --git a/monitoring/thread_status_updater.cc b/monitoring/thread_status_updater.cc
+index 0000000..0000000 100644
+--- a/monitoring/thread_status_updater.cc
++++ b/monitoring/thread_status_updater.cc
+@@ -16,7 +16,7 @@
+ 
+ #ifndef NROCKSDB_THREAD_STATUS
+ 
+-thread_local ThreadStatusData* ThreadStatusUpdater::thread_status_data_ =
++ThreadStatusData* ThreadStatusUpdater::thread_status_data_ =
+     nullptr;
+ 
+ void ThreadStatusUpdater::RegisterThread(ThreadStatus::ThreadType ttype,
+diff --git a/monitoring/thread_status_updater.h b/monitoring/thread_status_updater.h
+index 0000000..0000000 100644
+--- a/monitoring/thread_status_updater.h
++++ b/monitoring/thread_status_updater.h
+@@ -192,7 +192,7 @@
+  protected:
+ #ifndef NROCKSDB_THREAD_STATUS
+   // The thread-local variable for storing thread status.
+-  static thread_local ThreadStatusData* thread_status_data_;
++  static ThreadStatusData* thread_status_data_;
+ 
+   // Returns the pointer to the thread status data only when the
+   // thread status data is non-null and has enable_tracking == true.
+diff --git a/memory/concurrent_arena.cc b/memory/concurrent_arena.cc
+index 0000000..0000000 100644
+--- a/memory/concurrent_arena.cc
++++ b/memory/concurrent_arena.cc
+@@ -16,7 +16,7 @@
+ 
+ namespace ROCKSDB_NAMESPACE {
+ 
+-thread_local size_t ConcurrentArena::tls_cpuid = 0;
++size_t ConcurrentArena::tls_cpuid = 0;
+ 
+ namespace {
+ // If the shard block size is too large, in the worst case, every core
+diff --git a/memory/concurrent_arena.h b/memory/concurrent_arena.h
+index 0000000..0000000 100644
+--- a/memory/concurrent_arena.h
++++ b/memory/concurrent_arena.h
+@@ -98,7 +98,7 @@
+     Shard() : free_begin_(nullptr), allocated_and_unused_(0) {}
+   };
+ 
+-  static thread_local size_t tls_cpuid;
++  static size_t tls_cpuid;
+ 
+   char padding0[56] ROCKSDB_FIELD_UNUSED;
+ 
+diff --git a/monitoring/file_read_sample.h b/monitoring/file_read_sample.h
+index 0000000..0000000 100644
+--- a/monitoring/file_read_sample.h
++++ b/monitoring/file_read_sample.h
+@@ -22,7 +22,7 @@
+ inline bool should_sample_file_read_next() {
+   // Decrease probability of sampling next() to discount it as it is cheaper
+   // than seek()
+-  thread_local uint32_t counter = 0;
++  uint32_t counter = 0;
+   bool result = (++counter & (kFileReadNextSampleRate - 1)) == 0;
+   TEST_SYNC_POINT_CALLBACK("should_sample_file_read:override", &result);
+   return result;
+diff --git a/monitoring/instrumented_mutex.cc b/monitoring/instrumented_mutex.cc
+index 0000000..0000000 100644
+--- a/monitoring/instrumented_mutex.cc
++++ b/monitoring/instrumented_mutex.cc
+@@ -37,7 +37,7 @@
+ #endif
+ #ifdef COERCE_CONTEXT_SWITCH
+   if (stats_code_ == DB_MUTEX_WAIT_MICROS) {
+-    thread_local Random rnd(301);
++    static Random rnd(301);
+     if (rnd.OneIn(2)) {
+       if (bg_cv_) {
+         bg_cv_->SignalAll();
+diff --git a/memory/jemalloc_nodump_allocator.cc b/memory/jemalloc_nodump_allocator.cc
+index 0000000..0000000 100644
+--- a/memory/jemalloc_nodump_allocator.cc
++++ b/memory/jemalloc_nodump_allocator.cc
+@@ -123,7 +123,7 @@
+   // tolerate occasional stale reads in thread migration cases. However we need
+   // to make Random thread-safe and prevent cacheline bouncing. Whether this is
+   // worthwhile is still an open question.
+-  thread_local Random tl_random(next_seed.fetch_add(1));
++  static Random tl_random(next_seed.fetch_add(1));
+   return arena_indexes_[FastRange32(
+       tl_random.Next(), static_cast<uint32_t>(arena_indexes_.size()))];
+ }
+diff --git a/utilities/agg_merge/agg_merge.cc b/utilities/agg_merge/agg_merge.cc
+index 0000000..0000000 100644
+--- a/utilities/agg_merge/agg_merge.cc
++++ b/utilities/agg_merge/agg_merge.cc
+@@ -170,7 +170,7 @@
+ // threads so we cannot simply create one Aggregator and reuse.
+ // We use thread local instances instead.
+ AggMergeOperator::Accumulator& AggMergeOperator::GetTLSAccumulator() {
+-  static thread_local Accumulator tls_acc;
++  static Accumulator tls_acc;
+   tls_acc.Clear();
+   return tls_acc;
+ }
+diff --git a/db/blob/blob_file_partition_manager.cc b/db/blob/blob_file_partition_manager.cc
+index 0000000..0000000 100644
+--- a/db/blob/blob_file_partition_manager.cc
++++ b/db/blob/blob_file_partition_manager.cc
+@@ -65,9 +65,9 @@ DirectWriteCompressionState& GetDirectWriteCompressionState(
+     CompressionType compression, const CompressionOptions& compression_opts) {
+   assert(compression <= kLastBuiltinCompression);
+ 
+-  static thread_local std::array<DirectWriteCompressionState,
+-                                 static_cast<size_t>(kLastBuiltinCompression) +
+-                                     1>
++  static std::array<DirectWriteCompressionState,
++                    static_cast<size_t>(kLastBuiltinCompression) +
++                        1>
+       compression_states;
+ 
+   auto& compression_state =
+

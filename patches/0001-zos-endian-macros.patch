@@ -1,0 +1,32 @@
+From: RocksDB z/OS Port <zopen@rocksdb>
+Date: 2025-01-01
+Subject: [PATCH 1/9] z/OS: fix endian macros in port/port_posix.h
+
+z/OS does not provide <endian.h> and is always big-endian.
+Add an __MVS__-guarded block in the #else branch that defines the
+standard __BYTE_ORDER/__BIG_ENDIAN/__LITTLE_ENDIAN constants so the
+existing PLATFORM_IS_LITTLE_ENDIAN fallback below evaluates correctly
+on z/OS without pulling in the unavailable header.
+
+diff --git a/port/port_posix.h b/port/port_posix.h
+--- a/port/port_posix.h
++++ b/port/port_posix.h
+@@ -49,8 +49,17 @@
+ #include <sys/types.h>
+ #define PLATFORM_IS_LITTLE_ENDIAN (_BYTE_ORDER == _LITTLE_ENDIAN)
+ #else
++#if defined(__MVS__)
++/* z/OS is always big-endian; <endian.h> does not exist on z/OS */
++#ifndef __BYTE_ORDER
++#define __LITTLE_ENDIAN 1234
++#define __BIG_ENDIAN    4321
++#define __BYTE_ORDER    __BIG_ENDIAN
++#endif
++#else
+ #include <endian.h>
+ #endif
++#endif
+ #include <pthread.h>
+ #include <stdint.h>
+ #include <string.h>
+
