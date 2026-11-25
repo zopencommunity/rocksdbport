@@ -14,7 +14,7 @@ ThreadLocalPtr, etc.) are left untouched.
 diff --git a/db/blob/blob_file_partition_manager.cc b/db/blob/blob_file_partition_manager.cc
 --- a/db/blob/blob_file_partition_manager.cc
 +++ b/db/blob/blob_file_partition_manager.cc
-@@ -66,7 +66,7 @@
+@@ -65,7 +65,7 @@
      CompressionType compression, const CompressionOptions& compression_opts) {
    assert(compression <= kLastBuiltinCompression);
  
@@ -23,42 +23,6 @@ diff --git a/db/blob/blob_file_partition_manager.cc b/db/blob/blob_file_partitio
                                   static_cast<size_t>(kLastBuiltinCompression) +
                                       1>
        compression_states;
-diff --git a/db/db_filesnapshot.cc b/db/db_filesnapshot.cc
---- a/db/db_filesnapshot.cc
-+++ b/db/db_filesnapshot.cc
-@@ -246,7 +246,7 @@
-       options_snapshot.cf_options, options_path, fs_.get());
- }
- 
--thread_local LiveFilesPinRequest* LiveFilesPinRequest::current_ = nullptr;
-+LiveFilesPinRequest* LiveFilesPinRequest::current_ = nullptr;
- 
- LiveFilesPinRequest::LiveFilesPinRequest(Cleanable* pin)
-     : previous_(current_), pin_(pin) {
-diff --git a/db/db_impl/db_impl.h b/db/db_impl/db_impl.h
---- a/db/db_impl/db_impl.h
-+++ b/db/db_impl/db_impl.h
-@@ -152,7 +152,7 @@
-   static LiveFilesPinRequest* Take();
-   void Fulfill(Cleanable* pin, std::unordered_set<std::string> files);
- 
--  static thread_local LiveFilesPinRequest* current_;
-+  static LiveFilesPinRequest* current_;
-   LiveFilesPinRequest* const previous_;
-   Cleanable* const pin_;
-   bool taken_ = false;
-diff --git a/db/snapshot_impl.cc b/db/snapshot_impl.cc
---- a/db/snapshot_impl.cc
-+++ b/db/snapshot_impl.cc
-@@ -177,7 +177,7 @@
- 
- uint32_t ShardedSnapshotList::FallbackShard() {
-   static std::atomic<uint32_t> next_shard{0};
--  static thread_local const uint32_t shard =
-+  static const uint32_t shard =
-       next_shard.fetch_add(1, std::memory_order_relaxed);
-   return shard;
- }
 diff --git a/memory/concurrent_arena.cc b/memory/concurrent_arena.cc
 --- a/memory/concurrent_arena.cc
 +++ b/memory/concurrent_arena.cc
@@ -81,7 +45,7 @@ diff --git a/memory/concurrent_arena.h b/memory/concurrent_arena.h
 -  static thread_local size_t tls_cpuid;
 +  static size_t tls_cpuid;
  
-   char padding0[56] ROCKSDB_FIELD_UNUSED{};
+   char padding0[56] ROCKSDB_FIELD_UNUSED;
  
 diff --git a/memory/jemalloc_nodump_allocator.cc b/memory/jemalloc_nodump_allocator.cc
 --- a/memory/jemalloc_nodump_allocator.cc
@@ -110,22 +74,7 @@ diff --git a/monitoring/file_read_sample.h b/monitoring/file_read_sample.h
 diff --git a/monitoring/instrumented_mutex.cc b/monitoring/instrumented_mutex.cc
 --- a/monitoring/instrumented_mutex.cc
 +++ b/monitoring/instrumented_mutex.cc
-@@ -44,12 +44,12 @@
- };
- 
- SlowMutexState& GetSlowMutexState() {
--  static thread_local SlowMutexState state;
-+  static SlowMutexState state;
-   return state;
- }
- 
- std::array<SlowMutexRecord, kSlowMutexRecordCapacity>& SlowMutexRecords() {
--  static thread_local std::array<SlowMutexRecord, kSlowMutexRecordCapacity>
-+  static std::array<SlowMutexRecord, kSlowMutexRecordCapacity>
-       records;
-   return records;
- }
-@@ -235,7 +235,7 @@
+@@ -37,7 +37,7 @@
  #endif
  #ifdef COERCE_CONTEXT_SWITCH
    if (stats_code_ == DB_MUTEX_WAIT_MICROS) {
@@ -161,13 +110,14 @@ diff --git a/monitoring/iostats_context_imp.h b/monitoring/iostats_context_imp.h
 diff --git a/monitoring/perf_context.cc b/monitoring/perf_context.cc
 --- a/monitoring/perf_context.cc
 +++ b/monitoring/perf_context.cc
-@@ -183,8 +183,8 @@
+@@ -183,9 +183,9 @@
  // Put here just to make get_perf_context() simple without ifdef.
  PerfContext perf_context;
  #else
 -thread_local PerfContext perf_context;
--thread_local constinit PerfContext* perf_context_fast_ptr = nullptr;
 +PerfContext perf_context;
+ #if !defined(OS_SOLARIS)
+-thread_local constinit PerfContext* perf_context_fast_ptr = nullptr;
 +constinit PerfContext* perf_context_fast_ptr = nullptr;
  
  PerfContext* InitPerfContextFastPtr() {
@@ -175,15 +125,20 @@ diff --git a/monitoring/perf_context.cc b/monitoring/perf_context.cc
 diff --git a/monitoring/perf_context_imp.h b/monitoring/perf_context_imp.h
 --- a/monitoring/perf_context_imp.h
 +++ b/monitoring/perf_context_imp.h
-@@ -13,14 +13,14 @@
- #if defined(NPERF_CONTEXT)
+@@ -14,10 +14,10 @@
  extern PerfContext perf_context;
+ #else
+ #if defined(OS_SOLARIS)
+-extern thread_local PerfContext perf_context_;
++extern PerfContext perf_context_;
+ #define perf_context (*get_perf_context())
  #else
 -extern thread_local PerfContext perf_context;
 +extern PerfContext perf_context;
  #endif
+ #endif
  
- #if !defined(NPERF_CONTEXT)
+@@ -28,7 +28,7 @@
  // PerfContext has a non-trivial destructor, so each access to `perf_context`
  // from another file calls its TLS init function. The macros below read this
  // constant-initialized pointer instead.
@@ -195,14 +150,12 @@ diff --git a/monitoring/perf_context_imp.h b/monitoring/perf_context_imp.h
 diff --git a/monitoring/perf_level.cc b/monitoring/perf_level.cc
 --- a/monitoring/perf_level.cc
 +++ b/monitoring/perf_level.cc
-@@ -10,8 +10,8 @@
+@@ -10,7 +10,7 @@
  
  namespace ROCKSDB_NAMESPACE {
  
 -thread_local constinit PerfLevel perf_level = kEnableCount;
--thread_local constinit bool async_read_cpu_time_enabled = false;
 +constinit PerfLevel perf_level = kEnableCount;
-+constinit bool async_read_cpu_time_enabled = false;
  
  void SetPerfLevel(PerfLevel level) {
    assert(level > kUninitialized);
@@ -280,7 +233,7 @@ diff --git a/monitoring/thread_status_util.h b/monitoring/thread_status_util.h
 diff --git a/util/coro_stats_util.cc b/util/coro_stats_util.cc
 --- a/util/coro_stats_util.cc
 +++ b/util/coro_stats_util.cc
-@@ -41,7 +41,7 @@
+@@ -39,7 +39,7 @@
    uint64_t get_cpu_nanos_start = 0;
  };
  
@@ -289,6 +242,18 @@ diff --git a/util/coro_stats_util.cc b/util/coro_stats_util.cc
  #endif
  
  void InstallCoroutineStatsConfigToTLS(
+diff --git a/util/random.cc b/util/random.cc
+--- a/util/random.cc
++++ b/util/random.cc
+@@ -16,7 +16,7 @@
+ #include "util/aligned_storage.h"
+ #include "util/thread_local.h"
+ 
+-#define STORAGE_DECL static thread_local
++#define STORAGE_DECL static
+ 
+ namespace ROCKSDB_NAMESPACE {
+ 
 diff --git a/util/thread_local.cc b/util/thread_local.cc
 --- a/util/thread_local.cc
 +++ b/util/thread_local.cc
@@ -321,16 +286,4 @@ diff --git a/utilities/agg_merge/agg_merge.cc b/utilities/agg_merge/agg_merge.cc
    tls_acc.Clear();
    return tls_acc;
  }
-diff --git a/util/random.cc b/util/random.cc
---- a/util/random.cc
-+++ b/util/random.cc
-@@ -16,7 +16,7 @@
- #include "util/aligned_storage.h"
- #include "util/thread_local.h"
- 
--#define STORAGE_DECL static thread_local
-+#define STORAGE_DECL static
- 
- namespace ROCKSDB_NAMESPACE {
- 
 

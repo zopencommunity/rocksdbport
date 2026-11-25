@@ -1,5 +1,5 @@
-# bump: rocksdb-version /ROCKSDB_VERSION="(.*)"/ https://github.com/facebook/rocksdb/tree/main|semver:*
-# ROCKSDB_VERSION="V.R.M"
+# bump: rocksdb-version /ROCKSDB_VERSION="(.*)"/ https://github.com/facebook/rocksdb.git|semver:*
+ROCKSDB_VERSION="11.13.2"
 
 ###
 ### Build control file for the rocksdb port
@@ -11,6 +11,7 @@
 export ZOPEN_PROJECT_NAME="rocksdb"
 export ZOPEN_BUILD_LINE="STABLE"
 export ZOPEN_STABLE_URL="https://github.com/facebook/rocksdb.git"
+export ZOPEN_STABLE_TAG="v${ROCKSDB_VERSION}"
 export ZOPEN_STABLE_DEPS="bash git grep make sed cmake gflags libiconv ncurses"
 export ZOPEN_DEV_URL="https://github.com/facebook/rocksdb.git"
 export ZOPEN_DEV_DEPS="bash git grep make sed cmake gflags libiconv ncurses"
@@ -66,6 +67,11 @@ zopen_init() {
     exit 1
   fi
   export ROCKSDB_PORT_GFLAGS_DIR="${GFLAGS_DIR}"
+  if [ -f "${GFLAGS_DIR}/lib/libgflags_nothreads.a" ]; then
+    export ROCKSDB_PORT_GFLAGS_LIB="libgflags_nothreads.a"
+  else
+    export ROCKSDB_PORT_GFLAGS_LIB="libgflags.a"
+  fi
 
   LIBICONV_DIR=$(ls -d "${PKGROOT}/libiconv"/libiconv-*.zos 2>/dev/null | head -1)
   if [ -z "${LIBICONV_DIR}" ]; then
@@ -217,7 +223,7 @@ STUBEOF
     '	    case "$$f" in \' \
     '	      */tools/*) \' \
     '	        grep -q zos_stub_syms "$$f" || \' \
-    '	          sed -i "s|libgflags_nothreads.a|libgflags_nothreads.a $$ZOS_STUB_OBJ $$ZOSLIB_LIB/libzoslib.a $$HOOK_SAVED|" "$$f"; \' \
+    '	          sed -i "s|\$$| $$ZOS_STUB_OBJ $$ZOSLIB_LIB/libzoslib.a $$HOOK_SAVED|" "$$f"; \' \
     '	        grep -q bSTORENX=YES "$$f" || \' \
     '	          sed -i '"'"'s|$$| -Wl,-bSTORENX=YES|'"'"' "$$f"; \' \
     '	        ;; \' \
@@ -300,14 +306,7 @@ zopen_check_results() {
 }
 
 zopen_get_version() {
-  # Version is defined as three #define lines in include/rocksdb/version.h:
-  #   #define ROCKSDB_MAJOR 11
-  #   #define ROCKSDB_MINOR 7
-  #   #define ROCKSDB_PATCH 0
-  MAJOR=$(grep "^#define ROCKSDB_MAJOR" rocksdb/include/rocksdb/version.h 2>/dev/null | awk '{print $3}')
-  MINOR=$(grep "^#define ROCKSDB_MINOR" rocksdb/include/rocksdb/version.h 2>/dev/null | awk '{print $3}')
-  PATCH=$(grep "^#define ROCKSDB_PATCH" rocksdb/include/rocksdb/version.h 2>/dev/null | awk '{print $3}')
-  echo "${MAJOR}.${MINOR}.${PATCH}"
+  echo "${ROCKSDB_VERSION}"
 }
 
 
@@ -339,7 +338,7 @@ if [ "\${ZOPEN_ROCKSDB_ENV_SET}" != "1" ]; then
   export ZOPEN_EXTRA_CFLAGS="\${ZOPEN_EXTRA_CFLAGS} -I\${PWD}/include"
   export ZOPEN_EXTRA_CXXFLAGS="\${ZOPEN_EXTRA_CXXFLAGS} -fzos-le-char-mode=ascii -m64 -mzos-target=zosv2r5 -march=z13 -D__thread= -isystem ${ROCKSDB_PORT_ZOSLIB_DIR}/include -include ${ROCKSDB_PORT_ZOSLIB_DIR}/include/zos-v2r5-symbolfixes.h -I${ROCKSDB_PORT_LIBICONV_DIR}/include -I${ROCKSDB_PORT_NCURSES_DIR}/include -I${ROCKSDB_PORT_NCURSES_DIR}/include/ncurses -I\${PWD}/include"
   export ZOPEN_EXTRA_LDFLAGS="\${ZOPEN_EXTRA_LDFLAGS} -L\${PWD}/lib -L${ROCKSDB_PORT_ZOSLIB_DIR}/lib -L${ROCKSDB_PORT_LIBICONV_DIR}/lib -L${ROCKSDB_PORT_NCURSES_DIR}/lib -Wl,-bSTORENX=YES"
-  export ZOPEN_EXTRA_LIBS="\${ZOPEN_EXTRA_LIBS} \${PWD}/lib/librocksdb.a ${ROCKSDB_PORT_GFLAGS_DIR}/lib/libgflags_nothreads.a ${ROCKSDB_PORT_ZOSLIB_DIR}/lib/libzoslib.a \${PWD}/lib/zos_stub_syms.o \${PWD}/lib/zoslib_env_hook.o"
+  export ZOPEN_EXTRA_LIBS="\${ZOPEN_EXTRA_LIBS} \${PWD}/lib/librocksdb.a ${ROCKSDB_PORT_GFLAGS_DIR}/lib/${ROCKSDB_PORT_GFLAGS_LIB} ${ROCKSDB_PORT_ZOSLIB_DIR}/lib/libzoslib.a \${PWD}/lib/zos_stub_syms.o \${PWD}/lib/zoslib_env_hook.o"
 fi
 END
 }
