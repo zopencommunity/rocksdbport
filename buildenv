@@ -1,5 +1,5 @@
-# bump: rocksdb-version /ROCKSDB_VERSION="(.*)"/ https://github.com/facebook/rocksdb/tree/main|semver:*
-# ROCKSDB_VERSION="V.R.M"
+# bump: rocksdb-version /ROCKSDB_VERSION="(.*)"/ https://github.com/facebook/rocksdb.git|semver:*
+ROCKSDB_VERSION="11.13.2"
 
 ###
 ### Build control file for the rocksdb port
@@ -11,6 +11,7 @@
 export ZOPEN_PROJECT_NAME="rocksdb"
 export ZOPEN_BUILD_LINE="STABLE"
 export ZOPEN_STABLE_URL="https://github.com/facebook/rocksdb.git"
+export ZOPEN_STABLE_TAG="v${ROCKSDB_VERSION}"
 export ZOPEN_STABLE_DEPS="bash git grep make sed cmake gflags libiconv ncurses"
 export ZOPEN_DEV_URL="https://github.com/facebook/rocksdb.git"
 export ZOPEN_DEV_DEPS="bash git grep make sed cmake gflags libiconv ncurses"
@@ -300,14 +301,7 @@ zopen_check_results() {
 }
 
 zopen_get_version() {
-  # Version is defined as three #define lines in include/rocksdb/version.h:
-  #   #define ROCKSDB_MAJOR 11
-  #   #define ROCKSDB_MINOR 7
-  #   #define ROCKSDB_PATCH 0
-  MAJOR=$(grep "^#define ROCKSDB_MAJOR" rocksdb/include/rocksdb/version.h 2>/dev/null | awk '{print $3}')
-  MINOR=$(grep "^#define ROCKSDB_MINOR" rocksdb/include/rocksdb/version.h 2>/dev/null | awk '{print $3}')
-  PATCH=$(grep "^#define ROCKSDB_PATCH" rocksdb/include/rocksdb/version.h 2>/dev/null | awk '{print $3}')
-  echo "${MAJOR}.${MINOR}.${PATCH}"
+  echo "${ROCKSDB_VERSION}"
 }
 
 

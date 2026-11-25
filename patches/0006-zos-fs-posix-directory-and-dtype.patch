@@ -18,7 +18,7 @@ Two z/OS-specific fixes:
 diff --git a/env/fs_posix.cc b/env/fs_posix.cc
 --- a/env/fs_posix.cc
 +++ b/env/fs_posix.cc
-@@ -653,6 +653,11 @@
+@@ -656,6 +656,11 @@
                          std::unique_ptr<FSDirectory>* result,
                          IODebugContext* /*dbg*/) override {
      result->reset();
@@ -30,7 +30,7 @@ diff --git a/env/fs_posix.cc b/env/fs_posix.cc
      int fd;
      int flags = cloexec_flags(0, nullptr);
      {
-@@ -665,6 +670,7 @@
+@@ -668,6 +673,7 @@
        result->reset(new PosixDirectory(fd, name));
      }
      return IOStatus::OK();
@@ -38,7 +38,7 @@ diff --git a/env/fs_posix.cc b/env/fs_posix.cc
    }
  
    IOStatus FileExists(const std::string& fname, const IOOptions& /*opts*/,
-@@ -714,6 +720,22 @@
+@@ -717,6 +723,22 @@
      while ((entry = readdir(d)) != nullptr) {
        // filter out '.' and '..' directory entries
        // which appear only on some platforms
@@ -61,12 +61,12 @@ diff --git a/env/fs_posix.cc b/env/fs_posix.cc
        const bool ignore =
            entry->d_type == DT_DIR &&
            (strcmp(entry->d_name, ".") == 0 ||
-@@ -724,6 +746,7 @@
+@@ -727,6 +749,7 @@
             || opts.do_not_recurse
  #endif
            );
 +#endif  // __MVS__
        if (!ignore) {
-         result->emplace_back(entry->d_name);
+         result->push_back(entry->d_name);
        }
 
