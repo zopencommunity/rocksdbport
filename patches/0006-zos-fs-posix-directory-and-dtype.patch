@@ -9,13 +9,16 @@ Two z/OS-specific fixes:
    immediately. Non-z/OS platforms keep the original fd-based path.
 
 2. GetChildren(): z/OS struct dirent has no d_type field and does not
-   define DT_DIR. Replace "entry->d_type == DT_DIR &&" with a pure
-   strcmp-based check that works on all platforms including z/OS.
+   define DT_DIR. On __MVS__, skip "." and ".." by name, and when
+   opts.do_not_recurse is set, skip sub-directories using stat().
+   NOTE: do_not_recurse must NOT be OR-ed in unconditionally: DB recovery
+   passes do_not_recurse=true, which would then hide every file and make
+   DB::Open silently skip WAL replay (put OK, get/scan find nothing).
 
 diff --git a/env/fs_posix.cc b/env/fs_posix.cc
 --- a/env/fs_posix.cc
 +++ b/env/fs_posix.cc
-@@ -540,6 +540,11 @@
+@@ -653,6 +653,11 @@
                          std::unique_ptr<FSDirectory>* result,
                          IODebugContext* /*dbg*/) override {
      result->reset();
@@ -27,7 +30,7 @@ diff --git a/env/fs_posix.cc b/env/fs_posix.cc
      int fd;
      int flags = cloexec_flags(0, nullptr);
      {
-@@ -552,6 +557,7 @@
+@@ -665,6 +670,7 @@
        result->reset(new PosixDirectory(fd, name));
      }
      return IOStatus::OK();
@@ -35,12 +38,35 @@ diff --git a/env/fs_posix.cc b/env/fs_posix.cc
    }
  
    IOStatus FileExists(const std::string& fname, const IOOptions& /*opts*/,
-@@ -602,7 +608,6 @@
+@@ -714,6 +720,22 @@
+     while ((entry = readdir(d)) != nullptr) {
        // filter out '.' and '..' directory entries
        // which appear only on some platforms
++#if defined(__MVS__)
++      // z/OS: struct dirent has no d_type. Skip "." and "..", and when
++      // do_not_recurse is set, skip sub-directories (detected via stat()).
++      bool ignore =
++          (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0);
++#ifndef ASSERT_STATUS_CHECKED
++      if (!ignore && opts.do_not_recurse) {
++        struct stat child_stat;
++        const std::string child_path = dir + "/" + entry->d_name;
++        if (stat(child_path.c_str(), &child_stat) == 0 &&
++            S_ISDIR(child_stat.st_mode)) {
++          ignore = true;
++        }
++      }
++#endif
++#else
        const bool ignore =
--          entry->d_type == DT_DIR &&
+           entry->d_type == DT_DIR &&
            (strcmp(entry->d_name, ".") == 0 ||
-            strcmp(entry->d_name, "..") == 0
- #ifndef ASSERT_STATUS_CHECKED
+@@ -724,6 +746,7 @@
+            || opts.do_not_recurse
+ #endif
+           );
++#endif  // __MVS__
+       if (!ignore) {
+         result->emplace_back(entry->d_name);
+       }
 
