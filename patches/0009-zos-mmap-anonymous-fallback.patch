@@ -10,7 +10,6 @@ Two __MVS__-guarded changes:
 2. AllocateAnonymous(): use calloc(1, length) instead of mmap() on z/OS.
    calloc provides the same zero-filled anonymous memory semantics.
    Add #include <cstdlib> for calloc/free.
-
 diff --git a/port/mmap.cc b/port/mmap.cc
 --- a/port/mmap.cc
 +++ b/port/mmap.cc
@@ -19,10 +18,10 @@ diff --git a/port/mmap.cc b/port/mmap.cc
  #include <cassert>
  #include <cstdio>
 +#include <cstdlib>
- #include <cstring>
- #include <new>
  #include <utility>
-@@ -24,13 +25,19 @@
+ 
+ #include "util/hash.h"
+@@ -22,13 +23,19 @@
      (void)::CloseHandle(page_file_handle_);
    }
  #else   // OS_WIN -> !OS_WIN
@@ -42,7 +41,7 @@ diff --git a/port/mmap.cc b/port/mmap.cc
  #endif  // OS_WIN
  }
  
-@@ -78,11 +85,16 @@
+@@ -86,11 +93,16 @@
      huge_flag = MAP_HUGETLB;
  #endif  // MAP_HUGE_TLB
    }
